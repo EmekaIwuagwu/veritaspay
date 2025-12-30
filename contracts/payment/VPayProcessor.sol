@@ -28,7 +28,8 @@ contract VPayProcessor is
     using SafeERC20 for IERC20;
 
     /// @notice Role for managing merchant operations
-    bytes32 public constant MERCHANT_MANAGER_ROLE = keccak256("MERCHANT_MANAGER_ROLE");
+    bytes32 public constant MERCHANT_MANAGER_ROLE =
+        keccak256("MERCHANT_MANAGER_ROLE");
 
     /// @notice Role for upgrading the contract
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
@@ -76,10 +77,12 @@ contract VPayProcessor is
      * @param _feeCollector Fee collector address
      * @param _merchantFeeBps Merchant fee in basis points
      */
-    function initialize(address admin, address _vpusd, address _feeCollector, uint256 _merchantFeeBps)
-        external
-        initializer
-    {
+    function initialize(
+        address admin,
+        address _vpusd,
+        address _feeCollector,
+        uint256 _merchantFeeBps
+    ) external initializer {
         require(admin != address(0), "Invalid admin");
         require(_vpusd != address(0), "Invalid VPUSD");
         require(_feeCollector != address(0), "Invalid fee collector");
@@ -105,18 +108,28 @@ contract VPayProcessor is
      * @param country Country code
      * @param settlement Settlement preference
      */
-    function registerMerchant(string calldata businessName, string calldata country, FiatSettlementPreference settlement)
-        external
-        whenNotPaused
-    {
-        require(merchants[msg.sender].wallet == address(0), "Already registered");
+    function registerMerchant(
+        string calldata businessName,
+        string calldata country,
+        FiatSettlementPreference settlement
+    ) external whenNotPaused {
+        require(
+            merchants[msg.sender].wallet == address(0),
+            "Already registered"
+        );
         require(bytes(businessName).length > 0, "Invalid business name");
         require(bytes(country).length > 0, "Invalid country");
 
         // Check compliance
         if (address(complianceOracle) != address(0)) {
-            require(complianceOracle.isVerified(msg.sender), "Not KYC verified");
-            require(!complianceOracle.isSanctioned(msg.sender), "Sanctioned address");
+            require(
+                complianceOracle.isVerified(msg.sender),
+                "Not KYC verified"
+            );
+            require(
+                !complianceOracle.isSanctioned(msg.sender),
+                "Sanctioned address"
+            );
         }
 
         merchants[msg.sender] = Merchant({
@@ -140,26 +153,49 @@ contract VPayProcessor is
      * @param currency Destination currency
      * @return paymentId Unique payment identifier
      */
-    function processPayment(address merchant, uint256 amount, bytes32 invoiceId, string calldata currency)
-        external
-        whenNotPaused
-        nonReentrant
-        returns (bytes32 paymentId)
-    {
+    function processPayment(
+        address merchant,
+        uint256 amount,
+        bytes32 invoiceId,
+        string calldata currency
+    ) external whenNotPaused nonReentrant returns (bytes32 paymentId) {
         require(amount > 0, "Invalid amount");
-        require(merchants[merchant].wallet != address(0), "Merchant not registered");
+        require(
+            merchants[merchant].wallet != address(0),
+            "Merchant not registered"
+        );
 
         // Check compliance
         if (address(complianceOracle) != address(0)) {
-            require(complianceOracle.isVerified(msg.sender), "Payer not verified");
-            require(complianceOracle.isVerified(merchant), "Merchant not verified");
-            require(!complianceOracle.isSanctioned(msg.sender), "Payer sanctioned");
-            require(!complianceOracle.isSanctioned(merchant), "Merchant sanctioned");
+            require(
+                complianceOracle.isVerified(msg.sender),
+                "Payer not verified"
+            );
+            require(
+                complianceOracle.isVerified(merchant),
+                "Merchant not verified"
+            );
+            require(
+                !complianceOracle.isSanctioned(msg.sender),
+                "Payer sanctioned"
+            );
+            require(
+                !complianceOracle.isSanctioned(merchant),
+                "Merchant sanctioned"
+            );
         }
 
         // Generate unique payment ID
         paymentCounter++;
-        paymentId = keccak256(abi.encodePacked(msg.sender, merchant, amount, block.timestamp, paymentCounter));
+        paymentId = keccak256(
+            abi.encodePacked(
+                msg.sender,
+                merchant,
+                amount,
+                block.timestamp,
+                paymentCounter
+            )
+        );
 
         require(!processedPayments[paymentId], "Payment already processed");
         processedPayments[paymentId] = true;
@@ -169,7 +205,11 @@ contract VPayProcessor is
         uint256 netAmount = amount - fee;
 
         // Transfer VPUSD from payer
-        IERC20(address(vpusd)).safeTransferFrom(msg.sender, address(this), amount);
+        IERC20(address(vpusd)).safeTransferFrom(
+            msg.sender,
+            address(this),
+            amount
+        );
 
         // Collect fee
         if (fee > 0) {
@@ -183,14 +223,26 @@ contract VPayProcessor is
             IERC20(address(vpusd)).safeTransfer(merchant, netAmount);
         } else {
             // Initiate fiat offramp
-            _initiateFiatOfframp(merchant, netAmount, currency, merchantData.settlement);
+            _initiateFiatOfframp(
+                merchant,
+                netAmount,
+                currency,
+                merchantData.settlement
+            );
         }
 
         // Update merchant stats
         merchantData.totalVolume += amount;
         merchantData.transactionCount += 1;
 
-        emit PaymentProcessed(paymentId, msg.sender, merchant, amount, invoiceId, fee);
+        emit PaymentProcessed(
+            paymentId,
+            msg.sender,
+            merchant,
+            amount,
+            invoiceId,
+            fee
+        );
     }
 
     /**
@@ -200,7 +252,11 @@ contract VPayProcessor is
      * @param purpose Payment purpose
      * @return paymentIds Array of payment identifiers
      */
-    function batchPayments(address[] calldata recipients, uint256[] calldata amounts, string calldata purpose)
+    function batchPayments(
+        address[] calldata recipients,
+        uint256[] calldata amounts,
+        string calldata purpose
+    )
         external
         whenNotPaused
         nonReentrant
@@ -212,8 +268,14 @@ contract VPayProcessor is
 
         // Check compliance for sender
         if (address(complianceOracle) != address(0)) {
-            require(complianceOracle.isVerified(msg.sender), "Sender not verified");
-            require(!complianceOracle.isSanctioned(msg.sender), "Sender sanctioned");
+            require(
+                complianceOracle.isVerified(msg.sender),
+                "Sender not verified"
+            );
+            require(
+                !complianceOracle.isSanctioned(msg.sender),
+                "Sender sanctioned"
+            );
         }
 
         paymentIds = new bytes32[](recipients.length);
@@ -225,20 +287,37 @@ contract VPayProcessor is
 
             // Check recipient compliance
             if (address(complianceOracle) != address(0)) {
-                require(complianceOracle.isVerified(recipients[i]), "Recipient not verified");
-                require(!complianceOracle.isSanctioned(recipients[i]), "Recipient sanctioned");
+                require(
+                    complianceOracle.isVerified(recipients[i]),
+                    "Recipient not verified"
+                );
+                require(
+                    !complianceOracle.isSanctioned(recipients[i]),
+                    "Recipient sanctioned"
+                );
             }
 
             // Generate payment ID
             paymentCounter++;
-            paymentIds[i] =
-                keccak256(abi.encodePacked(msg.sender, recipients[i], amounts[i], block.timestamp, paymentCounter));
+            paymentIds[i] = keccak256(
+                abi.encodePacked(
+                    msg.sender,
+                    recipients[i],
+                    amounts[i],
+                    block.timestamp,
+                    paymentCounter
+                )
+            );
 
             totalAmount += amounts[i];
         }
 
         // Transfer total amount from sender
-        IERC20(address(vpusd)).safeTransferFrom(msg.sender, address(this), totalAmount);
+        IERC20(address(vpusd)).safeTransferFrom(
+            msg.sender,
+            address(this),
+            totalAmount
+        );
 
         // Distribute to recipients
         for (uint256 i = 0; i < recipients.length; i++) {
@@ -252,7 +331,12 @@ contract VPayProcessor is
             }
         }
 
-        emit BatchPaymentsExecuted(msg.sender, recipients.length, totalAmount, purpose);
+        emit BatchPaymentsExecuted(
+            msg.sender,
+            recipients.length,
+            totalAmount,
+            purpose
+        );
     }
 
     /**
@@ -262,17 +346,25 @@ contract VPayProcessor is
      * @param expiresAt Expiration timestamp
      * @return invoiceId Unique invoice identifier
      */
-    function createInvoice(uint256 amount, string calldata currency, uint256 expiresAt)
-        external
-        whenNotPaused
-        returns (bytes32 invoiceId)
-    {
+    function createInvoice(
+        uint256 amount,
+        string calldata currency,
+        uint256 expiresAt
+    ) external whenNotPaused returns (bytes32 invoiceId) {
         require(merchants[msg.sender].wallet != address(0), "Not a merchant");
         require(amount > 0, "Invalid amount");
         require(expiresAt > block.timestamp, "Invalid expiration");
 
         invoiceCounter++;
-        invoiceId = keccak256(abi.encodePacked(msg.sender, amount, currency, block.timestamp, invoiceCounter));
+        invoiceId = keccak256(
+            abi.encodePacked(
+                msg.sender,
+                amount,
+                currency,
+                block.timestamp,
+                invoiceCounter
+            )
+        );
 
         invoices[invoiceId] = Invoice({
             merchant: msg.sender,
@@ -297,8 +389,14 @@ contract VPayProcessor is
 
         // Check compliance
         if (address(complianceOracle) != address(0)) {
-            require(complianceOracle.isVerified(msg.sender), "Payer not verified");
-            require(!complianceOracle.isSanctioned(msg.sender), "Payer sanctioned");
+            require(
+                complianceOracle.isVerified(msg.sender),
+                "Payer not verified"
+            );
+            require(
+                !complianceOracle.isSanctioned(msg.sender),
+                "Payer sanctioned"
+            );
         }
 
         invoice.status = InvoiceStatus.PAID;
@@ -307,10 +405,18 @@ contract VPayProcessor is
         uint256 fee = calculateMerchantFee(invoice.amount);
         uint256 netAmount = invoice.amount - fee;
 
-        IERC20(address(vpusd)).safeTransferFrom(msg.sender, invoice.merchant, netAmount);
+        IERC20(address(vpusd)).safeTransferFrom(
+            msg.sender,
+            invoice.merchant,
+            netAmount
+        );
 
         if (fee > 0) {
-            IERC20(address(vpusd)).safeTransferFrom(msg.sender, feeCollector, fee);
+            IERC20(address(vpusd)).safeTransferFrom(
+                msg.sender,
+                feeCollector,
+                fee
+            );
         }
 
         // Update merchant stats
@@ -325,7 +431,9 @@ contract VPayProcessor is
      * @notice Update settlement preference
      * @param preference New settlement preference
      */
-    function updateSettlementPreference(FiatSettlementPreference preference) external {
+    function updateSettlementPreference(
+        FiatSettlementPreference preference
+    ) external {
         require(merchants[msg.sender].wallet != address(0), "Not a merchant");
         merchants[msg.sender].settlement = preference;
     }
@@ -335,7 +443,9 @@ contract VPayProcessor is
      * @param merchant Merchant address
      * @return merchantInfo Merchant structure
      */
-    function getMerchant(address merchant) external view returns (Merchant memory merchantInfo) {
+    function getMerchant(
+        address merchant
+    ) external view returns (Merchant memory merchantInfo) {
         return merchants[merchant];
     }
 
@@ -344,13 +454,18 @@ contract VPayProcessor is
      * @param merchant Merchant address
      * @return stats Merchant statistics
      */
-    function getMerchantStats(address merchant) external view returns (MerchantStats memory stats) {
+    function getMerchantStats(
+        address merchant
+    ) external view returns (MerchantStats memory stats) {
         Merchant memory merchantData = merchants[merchant];
         stats.totalVolume = merchantData.totalVolume;
         stats.transactionCount = merchantData.transactionCount;
-        stats.averageTransaction =
-            merchantData.transactionCount > 0 ? merchantData.totalVolume / merchantData.transactionCount : 0;
-        stats.feesGenerated = (merchantData.totalVolume * merchantFeeBps) / 10000;
+        stats.averageTransaction = merchantData.transactionCount > 0
+            ? merchantData.totalVolume / merchantData.transactionCount
+            : 0;
+        stats.feesGenerated =
+            (merchantData.totalVolume * merchantFeeBps) /
+            10000;
     }
 
     /**
@@ -358,7 +473,9 @@ contract VPayProcessor is
      * @param invoiceId Invoice identifier
      * @return invoice Invoice structure
      */
-    function getInvoice(bytes32 invoiceId) external view returns (Invoice memory invoice) {
+    function getInvoice(
+        bytes32 invoiceId
+    ) external view returns (Invoice memory invoice) {
         return invoices[invoiceId];
     }
 
@@ -367,7 +484,9 @@ contract VPayProcessor is
      * @param amount Payment amount
      * @return fee Fee amount
      */
-    function calculateMerchantFee(uint256 amount) public view returns (uint256 fee) {
+    function calculateMerchantFee(
+        uint256 amount
+    ) public view returns (uint256 fee) {
         return (amount * merchantFeeBps) / 10000;
     }
 
@@ -384,24 +503,24 @@ contract VPayProcessor is
         string memory currency,
         FiatSettlementPreference settlement
     ) private {
-        // TODO: Integrate with fiat offramp provider
-        // For now, hold VPUSD for manual settlement
-        // In production, this would call external API to convert to fiat
-
-        // Temporary: Transfer to offramp provider or hold
+        // If an offramp provider is set, transfer funds to them for conversion
         if (fiatOfframpProvider != address(0)) {
             IERC20(address(vpusd)).safeTransfer(fiatOfframpProvider, amount);
         } else {
-            // Hold in contract for manual processing
-            // Merchant can withdraw later
+            // Otherwise, hold in contract for manual settlement
+            // In a production environment, this would be integrated with a specific partner API
         }
+
+        emit SettlementInitiated(merchant, amount, currency, settlement);
     }
 
     /**
      * @notice Set compliance oracle
      * @param _complianceOracle Compliance oracle address
      */
-    function setComplianceOracle(address _complianceOracle) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setComplianceOracle(
+        address _complianceOracle
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         complianceOracle = IVPayCompliance(_complianceOracle);
     }
 
@@ -409,7 +528,9 @@ contract VPayProcessor is
      * @notice Set fiat offramp provider
      * @param _fiatOfframpProvider Offramp provider address
      */
-    function setFiatOfframpProvider(address _fiatOfframpProvider) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setFiatOfframpProvider(
+        address _fiatOfframpProvider
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         fiatOfframpProvider = _fiatOfframpProvider;
     }
 
@@ -417,7 +538,9 @@ contract VPayProcessor is
      * @notice Update merchant fee
      * @param _merchantFeeBps New merchant fee in basis points
      */
-    function setMerchantFee(uint256 _merchantFeeBps) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setMerchantFee(
+        uint256 _merchantFeeBps
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(_merchantFeeBps <= MAX_MERCHANT_FEE, "Fee too high");
         merchantFeeBps = _merchantFeeBps;
     }
@@ -427,7 +550,10 @@ contract VPayProcessor is
      * @param merchant Merchant address
      * @param verified Verification status
      */
-    function setMerchantVerification(address merchant, bool verified) external onlyRole(MERCHANT_MANAGER_ROLE) {
+    function setMerchantVerification(
+        address merchant,
+        bool verified
+    ) external onlyRole(MERCHANT_MANAGER_ROLE) {
         require(merchants[merchant].wallet != address(0), "Merchant not found");
         merchants[merchant].verified = verified;
     }
@@ -449,5 +575,7 @@ contract VPayProcessor is
     /**
      * @notice Authorize contract upgrade
      */
-    function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyRole(UPGRADER_ROLE) {}
 }

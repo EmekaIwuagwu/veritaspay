@@ -8,7 +8,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import "./interfaces/IHybridVault.sol";
 import "./interfaces/IVeritasPayUSD.sol";
 
@@ -56,6 +56,9 @@ contract HybridVault is
     /// @notice Token to tier mapping
     mapping(address => CollateralTier) public tokenTier;
 
+    /// @notice VPUSD price oracle
+    AggregatorV3Interface public vpusdOracle;
+
     /// @notice User positions
     mapping(uint256 => Position) public positions;
 
@@ -102,10 +105,12 @@ contract HybridVault is
      * @param _minReserveRatio Minimum reserve ratio in bps
      * @param _targetReserveRatio Target reserve ratio in bps
      */
-    function initialize(address admin, address _vpusd, uint256 _minReserveRatio, uint256 _targetReserveRatio)
-        external
-        initializer
-    {
+    function initialize(
+        address admin,
+        address _vpusd,
+        uint256 _minReserveRatio,
+        uint256 _targetReserveRatio
+    ) external initializer {
         require(admin != address(0), "Invalid admin");
         require(_vpusd != address(0), "Invalid VPUSD");
         require(_minReserveRatio >= 10000, "Reserve ratio too low");
@@ -131,11 +136,23 @@ contract HybridVault is
         lastResetTimestamp = block.timestamp;
 
         // Initialize tier weights (in bps)
-        tierInfo[CollateralTier.TIER1] = CollateralInfo({weight: 7000, minCollateralRatio: 15000, isActive: true}); // 70%, 150% CR
+        tierInfo[CollateralTier.TIER1] = CollateralInfo({
+            weight: 7000,
+            minCollateralRatio: 15000,
+            isActive: true
+        }); // 70%, 150% CR
 
-        tierInfo[CollateralTier.TIER2] = CollateralInfo({weight: 2000, minCollateralRatio: 20000, isActive: true}); // 20%, 200% CR
+        tierInfo[CollateralTier.TIER2] = CollateralInfo({
+            weight: 2000,
+            minCollateralRatio: 20000,
+            isActive: true
+        }); // 20%, 200% CR
 
-        tierInfo[CollateralTier.TIER3] = CollateralInfo({weight: 1000, minCollateralRatio: 15000, isActive: true}); // 10%, 150% CR
+        tierInfo[CollateralTier.TIER3] = CollateralInfo({
+            weight: 1000,
+            minCollateralRatio: 15000,
+            isActive: true
+        }); // 10%, 150% CR
     }
 
     /**
@@ -145,26 +162,39 @@ contract HybridVault is
      * @param vpusdAmount Amount of VPUSD to mint
      * @return positionId Unique position identifier
      */
-    function deposit(address collateralToken, uint256 collateralAmount, uint256 vpusdAmount)
-        external
-        whenNotPaused
-        nonReentrant
-        returns (uint256 positionId)
-    {
+    function deposit(
+        address collateralToken,
+        uint256 collateralAmount,
+        uint256 vpusdAmount
+    ) external whenNotPaused nonReentrant returns (uint256 positionId) {
         require(collateralAmount > 0, "Invalid collateral amount");
         require(vpusdAmount > 0, "Invalid VPUSD amount");
-        require(oracles[collateralToken] != AggregatorV3Interface(address(0)), "Unsupported collateral");
+        require(
+            oracles[collateralToken] != AggregatorV3Interface(address(0)),
+            "Unsupported collateral"
+        );
 
         CollateralTier tier = tokenTier[collateralToken];
         require(tierInfo[tier].isActive, "Tier inactive");
 
         // Check collateralization ratio
-        uint256 collateralValue = getCollateralValue(collateralToken, collateralAmount);
-        uint256 requiredCollateral = (vpusdAmount * tierInfo[tier].minCollateralRatio) / BPS_DENOMINATOR;
-        require(collateralValue >= requiredCollateral, "Insufficient collateral");
+        uint256 collateralValue = getCollateralValue(
+            collateralToken,
+            collateralAmount
+        );
+        uint256 requiredCollateral = (vpusdAmount *
+            tierInfo[tier].minCollateralRatio) / BPS_DENOMINATOR;
+        require(
+            collateralValue >= requiredCollateral,
+            "Insufficient collateral"
+        );
 
         // Transfer collateral
-        IERC20(collateralToken).safeTransferFrom(msg.sender, address(this), collateralAmount);
+        IERC20(collateralToken).safeTransferFrom(
+            msg.sender,
+            address(this),
+            collateralAmount
+        );
 
         // Mint VPUSD
         vpusd.mint(msg.sender, vpusdAmount);
@@ -183,7 +213,13 @@ contract HybridVault is
 
         userPositions[msg.sender].push(positionId);
 
-        emit CollateralDeposited(msg.sender, collateralToken, collateralAmount, vpusdAmount, positionId);
+        emit CollateralDeposited(
+            msg.sender,
+            collateralToken,
+            collateralAmount,
+            vpusdAmount,
+            positionId
+        );
     }
 
     /**
@@ -192,14 +228,17 @@ contract HybridVault is
      * @param collateralAmount Amount of collateral to withdraw
      * @param vpusdAmount Amount of VPUSD to burn
      */
-    function withdraw(uint256 positionId, uint256 collateralAmount, uint256 vpusdAmount)
-        external
-        whenNotPaused
-        nonReentrant
-    {
+    function withdraw(
+        uint256 positionId,
+        uint256 collateralAmount,
+        uint256 vpusdAmount
+    ) external whenNotPaused nonReentrant {
         Position storage position = positions[positionId];
         require(position.collateralAmount > 0, "Invalid position");
-        require(collateralAmount <= position.collateralAmount, "Insufficient collateral");
+        require(
+            collateralAmount <= position.collateralAmount,
+            "Insufficient collateral"
+        );
         require(vpusdAmount <= position.vpusdMinted, "Insufficient debt");
 
         // Burn VPUSD
@@ -212,11 +251,17 @@ contract HybridVault is
 
         // Check remaining position is healthy
         if (position.vpusdMinted > 0) {
-            require(isPositionHealthy(positionId), "Position undercollateralized");
+            require(
+                isPositionHealthy(positionId),
+                "Position undercollateralized"
+            );
         }
 
         // Transfer collateral back
-        IERC20(position.collateralToken).safeTransfer(msg.sender, collateralAmount);
+        IERC20(position.collateralToken).safeTransfer(
+            msg.sender,
+            collateralAmount
+        );
 
         emit CollateralWithdrawn(msg.sender, positionId, collateralAmount);
     }
@@ -224,7 +269,11 @@ contract HybridVault is
     /**
      * @notice Execute algorithmic stabilization mechanism
      */
-    function executeStabilization() external onlyRole(STABILIZER_ROLE) whenNotPaused {
+    function executeStabilization()
+        external
+        onlyRole(STABILIZER_ROLE)
+        whenNotPaused
+    {
         require(!circuitBreakerActive, "Circuit breaker active");
 
         // Reset daily caps if needed
@@ -239,7 +288,9 @@ contract HybridVault is
 
         // Calculate deviation
         int256 deviation = int256(currentPrice) - int256(targetPrice);
-        uint256 absDeviation = deviation >= 0 ? uint256(deviation) : uint256(-deviation);
+        uint256 absDeviation = deviation >= 0
+            ? uint256(deviation)
+            : uint256(-deviation);
 
         // Check if stabilization needed
         uint256 deviationBps = (absDeviation * BPS_DENOMINATOR) / targetPrice;
@@ -256,15 +307,26 @@ contract HybridVault is
 
         int256 supplyChange = 0;
 
-        if (currentPrice > targetPrice + (targetPrice * deviationThreshold / BPS_DENOMINATOR)) {
+        if (
+            currentPrice >
+            targetPrice + ((targetPrice * deviationThreshold) / BPS_DENOMINATOR)
+        ) {
             // Price too high: expand supply
             supplyChange = _expandSupply(currentPrice, targetPrice);
-        } else if (currentPrice < targetPrice - (targetPrice * deviationThreshold / BPS_DENOMINATOR)) {
+        } else if (
+            currentPrice <
+            targetPrice - ((targetPrice * deviationThreshold) / BPS_DENOMINATOR)
+        ) {
             // Price too low: contract supply
             supplyChange = _contractSupply(currentPrice, targetPrice);
         }
 
-        emit StabilizationExecuted(currentPrice, targetPrice, supplyChange, block.timestamp);
+        emit StabilizationExecuted(
+            currentPrice,
+            targetPrice,
+            supplyChange,
+            block.timestamp
+        );
     }
 
     /**
@@ -273,12 +335,16 @@ contract HybridVault is
      * @param targetPrice Target price ($1.00)
      * @return supplyChange Amount of supply added
      */
-    function _expandSupply(uint256 currentPrice, uint256 targetPrice) private returns (int256 supplyChange) {
+    function _expandSupply(
+        uint256 currentPrice,
+        uint256 targetPrice
+    ) private returns (int256 supplyChange) {
         uint256 totalSupply = vpusd.totalSupply();
         uint256 priceDeviation = currentPrice - targetPrice;
 
         // Calculate optimal mint amount (proportional to deviation)
-        uint256 mintAmount = (totalSupply * priceDeviation) / (currentPrice * 10);
+        uint256 mintAmount = (totalSupply * priceDeviation) /
+            (currentPrice * 10);
 
         // Apply daily cap
         uint256 dailyCap = (totalSupply * maxDailyMintCap) / BPS_DENOMINATOR;
@@ -304,12 +370,16 @@ contract HybridVault is
      * @param targetPrice Target price ($1.00)
      * @return supplyChange Amount of supply removed
      */
-    function _contractSupply(uint256 currentPrice, uint256 targetPrice) private returns (int256 supplyChange) {
+    function _contractSupply(
+        uint256 currentPrice,
+        uint256 targetPrice
+    ) private returns (int256 supplyChange) {
         uint256 totalSupply = vpusd.totalSupply();
         uint256 priceDeviation = targetPrice - currentPrice;
 
         // Calculate optimal burn amount
-        uint256 burnAmount = (totalSupply * priceDeviation) / (targetPrice * 10);
+        uint256 burnAmount = (totalSupply * priceDeviation) /
+            (targetPrice * 10);
 
         // Apply daily cap
         uint256 dailyCap = (totalSupply * maxDailyBurnCap) / BPS_DENOMINATOR;
@@ -335,7 +405,24 @@ contract HybridVault is
      * @notice Rebalance reserves across tiers
      */
     function rebalanceReserves() external onlyRole(KEEPER_ROLE) {
-        // TODO: Implement rebalancing logic to maintain tier allocations
+        uint256 totalValue = _calculateTotalCollateralValue();
+        if (totalValue == 0) return;
+
+        for (uint8 i = 0; i < 3; i++) {
+            CollateralTier tier = CollateralTier(i);
+            uint256 tierValue = 0;
+            address[] memory tokens = tierTokens[tier];
+            for (uint256 j = 0; j < tokens.length; j++) {
+                uint256 balance = IERC20(tokens[j]).balanceOf(address(this));
+                tierValue += getCollateralValue(tokens[j], balance);
+            }
+
+            uint256 currentWeight = (tierValue * BPS_DENOMINATOR) / totalValue;
+            uint256 targetWeight = tierInfo[tier].weight;
+
+            emit TierWeightStatus(tier, currentWeight, targetWeight);
+        }
+
         emit ReservesRebalanced(block.timestamp);
     }
 
@@ -348,23 +435,49 @@ contract HybridVault is
         require(position.collateralAmount > 0, "Invalid position");
         require(!isPositionHealthy(positionId), "Position healthy");
 
-        uint256 collateralValue = getCollateralValue(position.collateralToken, position.collateralAmount);
+        uint256 collateralValue = getCollateralValue(
+            position.collateralToken,
+            position.collateralAmount
+        );
         uint256 debtValue = position.vpusdMinted;
 
         // Liquidator must repay the debt
         vpusd.burn(msg.sender, debtValue);
 
-        // Transfer collateral to liquidator (with incentive)
-        uint256 liquidationBonus = (position.collateralAmount * 500) / BPS_DENOMINATOR; // 5% bonus
-        uint256 totalCollateral = position.collateralAmount + liquidationBonus;
+        // Calculate collateral to transfer: (debtValue + 5% bonus) converted to collateral units
+        // Since debtValue is in USD (18 decimals) and collateralValue is in USD (18 decimals)
+        // Amount to transfer = (debtValue * 1.05) / collateralPrice
 
-        IERC20(position.collateralToken).safeTransfer(msg.sender, totalCollateral);
+        AggregatorV3Interface oracle = oracles[position.collateralToken];
+        uint8 decimals = oracle.decimals();
+        (, int256 price, , uint256 updatedAt, ) = oracle.latestRoundData();
+        require(updatedAt >= block.timestamp - ORACLE_TIMEOUT, "Stale price");
+        uint256 priceScaled = uint256(price) * (10 ** (18 - decimals));
+
+        uint256 totalValueToLiquidator = (debtValue * 10500) / BPS_DENOMINATOR;
+        uint256 amountToTransfer = (totalValueToLiquidator * PRICE_PRECISION) /
+            priceScaled;
+
+        // Cap at available collateral
+        if (amountToTransfer > position.collateralAmount) {
+            amountToTransfer = position.collateralAmount;
+        }
+
+        IERC20(position.collateralToken).safeTransfer(
+            msg.sender,
+            amountToTransfer
+        );
 
         // Clear position
         position.collateralAmount = 0;
         position.vpusdMinted = 0;
 
-        emit PositionLiquidated(msg.sender, positionId, totalCollateral, debtValue);
+        emit PositionLiquidated(
+            msg.sender,
+            positionId,
+            amountToTransfer,
+            debtValue
+        );
     }
 
     /**
@@ -385,7 +498,11 @@ contract HybridVault is
     /**
      * @notice Calculate total collateral value across all tiers
      */
-    function _calculateTotalCollateralValue() private view returns (uint256 totalValue) {
+    function _calculateTotalCollateralValue()
+        private
+        view
+        returns (uint256 totalValue)
+    {
         for (uint8 i = 0; i < 3; i++) {
             CollateralTier tier = CollateralTier(i);
             address[] memory tokens = tierTokens[tier];
@@ -402,9 +519,17 @@ contract HybridVault is
      * @return price Current price in USD (18 decimals)
      */
     function getVPUSDPrice() public view returns (uint256 price) {
-        // TODO: Implement multi-oracle price aggregation
-        // For now, return target price
-        return PRICE_PRECISION;
+        if (address(vpusdOracle) != address(0)) {
+            (, int256 p, , uint256 updatedAt, ) = vpusdOracle.latestRoundData();
+            require(
+                updatedAt >= block.timestamp - ORACLE_TIMEOUT,
+                "Stale price"
+            );
+            require(p > 0, "Invalid price");
+            uint8 decimals = vpusdOracle.decimals();
+            return uint256(p) * (10 ** (18 - decimals));
+        }
+        return PRICE_PRECISION; // Fallback to $1.00
     }
 
     /**
@@ -413,11 +538,14 @@ contract HybridVault is
      * @param amount Amount of collateral
      * @return value Value in USD
      */
-    function getCollateralValue(address token, uint256 amount) public view returns (uint256 value) {
+    function getCollateralValue(
+        address token,
+        uint256 amount
+    ) public view returns (uint256 value) {
         AggregatorV3Interface oracle = oracles[token];
         require(address(oracle) != address(0), "No oracle");
 
-        (, int256 price,, uint256 updatedAt,) = oracle.latestRoundData();
+        (, int256 price, , uint256 updatedAt, ) = oracle.latestRoundData();
         require(updatedAt >= block.timestamp - ORACLE_TIMEOUT, "Stale price");
         require(price > 0, "Invalid price");
 
@@ -432,7 +560,9 @@ contract HybridVault is
      * @param positionId Position identifier
      * @return position Position structure
      */
-    function getPosition(uint256 positionId) external view returns (Position memory position) {
+    function getPosition(
+        uint256 positionId
+    ) external view returns (Position memory position) {
         return positions[positionId];
     }
 
@@ -441,14 +571,20 @@ contract HybridVault is
      * @param positionId Position identifier
      * @return healthy True if position is healthy
      */
-    function isPositionHealthy(uint256 positionId) public view returns (bool healthy) {
+    function isPositionHealthy(
+        uint256 positionId
+    ) public view returns (bool healthy) {
         Position memory position = positions[positionId];
         if (position.vpusdMinted == 0) {
             return true;
         }
 
-        uint256 collateralValue = getCollateralValue(position.collateralToken, position.collateralAmount);
-        uint256 requiredCollateral = (position.vpusdMinted * liquidationThreshold) / BPS_DENOMINATOR;
+        uint256 collateralValue = getCollateralValue(
+            position.collateralToken,
+            position.collateralAmount
+        );
+        uint256 requiredCollateral = (position.vpusdMinted *
+            liquidationThreshold) / BPS_DENOMINATOR;
 
         return collateralValue >= requiredCollateral;
     }
@@ -459,10 +595,11 @@ contract HybridVault is
      * @param tier Collateral tier
      * @param oracle Price oracle address
      */
-    function addCollateralToken(address token, CollateralTier tier, address oracle)
-        external
-        onlyRole(DEFAULT_ADMIN_ROLE)
-    {
+    function addCollateralToken(
+        address token,
+        CollateralTier tier,
+        address oracle
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(token != address(0), "Invalid token");
         require(oracle != address(0), "Invalid oracle");
 
@@ -504,8 +641,21 @@ contract HybridVault is
      * @notice Set DEX router for stabilization operations
      * @param _dexRouter DEX router address
      */
-    function setDEXRouter(address _dexRouter) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setDEXRouter(
+        address _dexRouter
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         dexRouter = _dexRouter;
+    }
+
+    /**
+     * @notice Set VPUSD price oracle
+     * @param _vpusdOracle Oracle address
+     */
+    function setVPUSDOracle(
+        address _vpusdOracle
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(_vpusdOracle != address(0), "Invalid oracle");
+        vpusdOracle = AggregatorV3Interface(_vpusdOracle);
     }
 
     /**
@@ -531,5 +681,7 @@ contract HybridVault is
     /**
      * @notice Authorize contract upgrade
      */
-    function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyRole(UPGRADER_ROLE) {}
 }

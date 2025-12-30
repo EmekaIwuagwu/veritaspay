@@ -11,9 +11,15 @@ import "../core/interfaces/IVPayCompliance.sol";
  * @notice KYC/AML compliance and regulatory features
  * @dev Integrates with external compliance providers and maintains sanction lists
  */
-contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradeable, IVPayCompliance {
+contract VPayCompliance is
+    Initializable,
+    AccessControlUpgradeable,
+    UUPSUpgradeable,
+    IVPayCompliance
+{
     /// @notice Role for compliance operations
-    bytes32 public constant COMPLIANCE_OFFICER_ROLE = keccak256("COMPLIANCE_OFFICER_ROLE");
+    bytes32 public constant COMPLIANCE_OFFICER_ROLE =
+        keccak256("COMPLIANCE_OFFICER_ROLE");
 
     /// @notice Role for upgrading the contract
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
@@ -61,7 +67,10 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @param admin Admin address
      * @param _largeTransactionThreshold Large transaction threshold
      */
-    function initialize(address admin, uint256 _largeTransactionThreshold) external initializer {
+    function initialize(
+        address admin,
+        uint256 _largeTransactionThreshold
+    ) external initializer {
         require(admin != address(0), "Invalid admin");
 
         __AccessControl_init();
@@ -79,7 +88,9 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @param user User address to verify
      * @return success True if verification successful
      */
-    function verifyUser(address user) external onlyRole(COMPLIANCE_OFFICER_ROLE) returns (bool success) {
+    function verifyUser(
+        address user
+    ) external onlyRole(COMPLIANCE_OFFICER_ROLE) returns (bool success) {
         require(user != address(0), "Invalid address");
         require(!sanctionedAddresses[user], "User is sanctioned");
 
@@ -95,7 +106,9 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @param user User address
      * @return riskScore Risk score (0-100)
      */
-    function getRiskScore(address user) external view returns (uint8 riskScore) {
+    function getRiskScore(
+        address user
+    ) external view returns (uint8 riskScore) {
         return riskScores[user];
     }
 
@@ -104,7 +117,10 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @param txId Transaction identifier
      * @param reason Reason for flagging
      */
-    function flagTransaction(bytes32 txId, string calldata reason) external onlyRole(COMPLIANCE_OFFICER_ROLE) {
+    function flagTransaction(
+        bytes32 txId,
+        string calldata reason
+    ) external onlyRole(COMPLIANCE_OFFICER_ROLE) {
         flaggedTransactions[txId] = reason;
         emit TransactionFlagged(txId, address(0), reason, 0);
     }
@@ -123,7 +139,9 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @param user User address
      * @return sanctioned True if sanctioned
      */
-    function isSanctioned(address user) external view returns (bool sanctioned) {
+    function isSanctioned(
+        address user
+    ) external view returns (bool sanctioned) {
         return sanctionedAddresses[user];
     }
 
@@ -132,7 +150,10 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @param user User address
      * @param reason Reason for sanction
      */
-    function addToSanctionList(address user, string calldata reason) external onlyRole(COMPLIANCE_OFFICER_ROLE) {
+    function addToSanctionList(
+        address user,
+        string calldata reason
+    ) external onlyRole(COMPLIANCE_OFFICER_ROLE) {
         require(user != address(0), "Invalid address");
 
         sanctionedAddresses[user] = true;
@@ -146,10 +167,10 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @param users Array of user addresses
      * @param reason Reason for sanctions
      */
-    function batchAddToSanctionList(address[] calldata users, string calldata reason)
-        external
-        onlyRole(COMPLIANCE_OFFICER_ROLE)
-    {
+    function batchAddToSanctionList(
+        address[] calldata users,
+        string calldata reason
+    ) external onlyRole(COMPLIANCE_OFFICER_ROLE) {
         for (uint256 i = 0; i < users.length; i++) {
             require(users[i] != address(0), "Invalid address");
             sanctionedAddresses[users[i]] = true;
@@ -162,7 +183,9 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @notice Remove address from sanction list
      * @param user User address
      */
-    function removeFromSanctionList(address user) external onlyRole(COMPLIANCE_OFFICER_ROLE) {
+    function removeFromSanctionList(
+        address user
+    ) external onlyRole(COMPLIANCE_OFFICER_ROLE) {
         sanctionedAddresses[user] = false;
         delete sanctionReasons[user];
 
@@ -176,11 +199,11 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @param amount Transaction amount
      * @return risk Transaction risk assessment
      */
-    function analyzeTransaction(address sender, address recipient, uint256 amount)
-        external
-        view
-        returns (TransactionRisk memory risk)
-    {
+    function analyzeTransaction(
+        address sender,
+        address recipient,
+        uint256 amount
+    ) external view returns (TransactionRisk memory risk) {
         uint8 riskScore = 0;
         string[] memory flags = new string[](5);
         uint256 flagCount = 0;
@@ -239,8 +262,16 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @param recipient Recipient address
      * @param amount Transaction amount
      */
-    function recordTransaction(address sender, address recipient, uint256 amount) external {
-        TransactionRisk memory risk = this.analyzeTransaction(sender, recipient, amount);
+    function recordTransaction(
+        address sender,
+        address recipient,
+        uint256 amount
+    ) external {
+        TransactionRisk memory risk = this.analyzeTransaction(
+            sender,
+            recipient,
+            amount
+        );
 
         transactionHistory.push(
             TransactionRecord({
@@ -254,9 +285,22 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
 
         // Flag high-risk transactions
         if (risk.requiresReview) {
-            bytes32 txId = keccak256(abi.encodePacked(sender, recipient, amount, block.timestamp));
+            bytes32 txId = keccak256(
+                abi.encodePacked(sender, recipient, amount, block.timestamp)
+            );
             flaggedTransactions[txId] = "High risk transaction";
-            emit TransactionFlagged(txId, sender, "High risk score", risk.riskScore);
+            emit TransactionFlagged(
+                txId,
+                sender,
+                "High risk score",
+                risk.riskScore
+            );
+        }
+
+        // Automatic risk score adjustment based on volume
+        if (amount >= largeTransactionThreshold) {
+            if (riskScores[sender] < 90) riskScores[sender] += 5;
+            if (riskScores[recipient] < 90) riskScores[recipient] += 2;
         }
     }
 
@@ -266,7 +310,10 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @param endTime End timestamp
      * @return reportData Encoded report data
      */
-    function generateAuditReport(uint256 startTime, uint256 endTime) external view returns (bytes memory reportData) {
+    function generateAuditReport(
+        uint256 startTime,
+        uint256 endTime
+    ) external view returns (bytes memory reportData) {
         uint256 totalTransactions = 0;
         uint256 highRiskCount = 0;
         uint256 totalVolume = 0;
@@ -284,7 +331,13 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
             }
         }
 
-        reportData = abi.encode(totalTransactions, highRiskCount, totalVolume, startTime, endTime);
+        reportData = abi.encode(
+            totalTransactions,
+            highRiskCount,
+            totalVolume,
+            startTime,
+            endTime
+        );
     }
 
     /**
@@ -299,7 +352,10 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @param user User address
      * @param score Risk score (0-100)
      */
-    function updateRiskScore(address user, uint8 score) external onlyRole(COMPLIANCE_OFFICER_ROLE) {
+    function updateRiskScore(
+        address user,
+        uint8 score
+    ) external onlyRole(COMPLIANCE_OFFICER_ROLE) {
         require(score <= 100, "Invalid score");
         riskScores[user] = score;
     }
@@ -308,7 +364,9 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @notice Update large transaction threshold
      * @param threshold New threshold
      */
-    function setLargeTransactionThreshold(uint256 threshold) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setLargeTransactionThreshold(
+        uint256 threshold
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         largeTransactionThreshold = threshold;
     }
 
@@ -316,7 +374,9 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @notice Batch verify users
      * @param users Array of user addresses
      */
-    function batchVerifyUsers(address[] calldata users) external onlyRole(COMPLIANCE_OFFICER_ROLE) {
+    function batchVerifyUsers(
+        address[] calldata users
+    ) external onlyRole(COMPLIANCE_OFFICER_ROLE) {
         for (uint256 i = 0; i < users.length; i++) {
             require(users[i] != address(0), "Invalid address");
             require(!sanctionedAddresses[users[i]], "User is sanctioned");
@@ -331,5 +391,7 @@ contract VPayCompliance is Initializable, AccessControlUpgradeable, UUPSUpgradea
     /**
      * @notice Authorize contract upgrade
      */
-    function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyRole(UPGRADER_ROLE) {}
 }

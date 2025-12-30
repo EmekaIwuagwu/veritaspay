@@ -63,6 +63,11 @@ interface IHybridVault {
     event PositionLiquidated(address indexed user, uint256 positionId, uint256 collateralSeized, uint256 debtRepaid);
 
     /**
+     * @notice Emitted when tier weights are checked during rebalancing
+     */
+    event TierWeightStatus(CollateralTier indexed tier, uint256 currentWeight, uint256 targetWeight);
+
+    /**
      * @notice Emitted when circuit breaker is activated
      */
     event CircuitBreakerActivated(uint256 price, uint256 timestamp);

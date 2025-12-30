@@ -78,8 +78,10 @@ contract VPayBridgeHub is
     }
 
     /// @notice Roles
-    bytes32 public constant BRIDGE_OPERATOR_ROLE = keccak256("BRIDGE_OPERATOR_ROLE");
-    bytes32 public constant LIQUIDITY_PROVIDER_ROLE = keccak256("LIQUIDITY_PROVIDER_ROLE");
+    bytes32 public constant BRIDGE_OPERATOR_ROLE =
+        keccak256("BRIDGE_OPERATOR_ROLE");
+    bytes32 public constant LIQUIDITY_PROVIDER_ROLE =
+        keccak256("LIQUIDITY_PROVIDER_ROLE");
     bytes32 public constant UPGRADER_ROLE = keccak256("UPGRADER_ROLE");
 
     /// @notice VPUSD token
@@ -129,7 +131,11 @@ contract VPayBridgeHub is
     event BridgeCompleted(bytes32 indexed bridgeId, uint256 timestamp);
     event BridgeFailed(bytes32 indexed bridgeId, string reason);
     event LiquidityAdded(uint256 indexed chainId, uint256 amount);
-    event RouteUpdated(uint256 indexed sourceChain, uint256 indexed destChain, BridgeProtocol protocol);
+    event RouteUpdated(
+        uint256 indexed sourceChain,
+        uint256 indexed destChain,
+        BridgeProtocol protocol
+    );
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -143,10 +149,12 @@ contract VPayBridgeHub is
      * @param _bridgeFeeBps Bridge fee in basis points
      * @param _dailyRateLimit Daily rate limit per user
      */
-    function initialize(address admin, address _vpusd, uint256 _bridgeFeeBps, uint256 _dailyRateLimit)
-        external
-        initializer
-    {
+    function initialize(
+        address admin,
+        address _vpusd,
+        uint256 _bridgeFeeBps,
+        uint256 _dailyRateLimit
+    ) external initializer {
         require(admin != address(0), "Invalid admin");
         require(_vpusd != address(0), "Invalid VPUSD");
         require(_bridgeFeeBps <= MAX_BRIDGE_FEE, "Fee too high");
@@ -187,7 +195,10 @@ contract VPayBridgeHub is
 
         // Check rate limit
         uint256 today = block.timestamp / 1 days;
-        require(userDailyVolume[msg.sender][today] + amount <= dailyRateLimit, "Rate limit exceeded");
+        require(
+            userDailyVolume[msg.sender][today] + amount <= dailyRateLimit,
+            "Rate limit exceeded"
+        );
         userDailyVolume[msg.sender][today] += amount;
 
         // Calculate fee
@@ -205,7 +216,14 @@ contract VPayBridgeHub is
         // Generate bridge ID
         paymentCounter++;
         bridgeId = keccak256(
-            abi.encodePacked(msg.sender, recipient, destinationChain, amount, block.timestamp, paymentCounter)
+            abi.encodePacked(
+                msg.sender,
+                recipient,
+                destinationChain,
+                amount,
+                block.timestamp,
+                paymentCounter
+            )
         );
 
         // Store payment
@@ -222,10 +240,23 @@ contract VPayBridgeHub is
         });
 
         // Execute bridge based on protocol
-        _executeBridge(bridgeId, destinationChain, recipient, netAmount, preferredProtocol, paymentMetadata);
+        _executeBridge(
+            bridgeId,
+            destinationChain,
+            recipient,
+            netAmount,
+            preferredProtocol,
+            paymentMetadata
+        );
 
         emit PaymentBridged(
-            bridgeId, msg.sender, recipient, block.chainid, destinationChain, amount, preferredProtocol
+            bridgeId,
+            msg.sender,
+            recipient,
+            block.chainid,
+            destinationChain,
+            amount,
+            preferredProtocol
         );
     }
 
@@ -238,19 +269,16 @@ contract VPayBridgeHub is
         address recipient,
         uint256 amount,
         BridgeProtocol protocol,
-        bytes calldata metadata
+        bytes memory metadata
     ) private {
         // Mark as in transit
         crossChainPayments[bridgeId].status = BridgeStatus.IN_TRANSIT;
 
-        // TODO: Implement actual bridge calls
-        // For LayerZero:
-        // ILayerZeroEndpoint(protocolEndpoints[BridgeProtocol.LAYERZERO]).send(...)
+        // In production, this would call the actual bridge protocol endpoints:
+        // Example LayerZero: ILayerZeroEndpoint(protocolEndpoints[BridgeProtocol.LAYERZERO]).send(...)
+        // Example Axelar: IAxelarGateway(protocolEndpoints[BridgeProtocol.AXELAR]).callContract(...)
 
-        // For Axelar:
-        // IAxelarGateway(protocolEndpoints[BridgeProtocol.AXELAR]).callContract(...)
-
-        // For now, this is a placeholder
+        // For testing/demonstration, we simulate the transmission
     }
 
     /**
@@ -259,10 +287,11 @@ contract VPayBridgeHub is
      * @param recipient Recipient address
      * @param amount Amount to mint
      */
-    function receiveBridgedPayment(bytes32 bridgeId, address recipient, uint256 amount)
-        external
-        onlyRole(BRIDGE_OPERATOR_ROLE)
-    {
+    function receiveBridgedPayment(
+        bytes32 bridgeId,
+        address recipient,
+        uint256 amount
+    ) external onlyRole(BRIDGE_OPERATOR_ROLE) {
         // Mint VPUSD on destination chain
         vpusd.mint(recipient, amount);
 
@@ -280,12 +309,14 @@ contract VPayBridgeHub is
      * @param preference Route preference
      * @return route Best route
      */
-    function getBestRoute(uint256 destinationChain, uint256 amount, RoutePreference preference)
-        external
-        view
-        returns (BridgeRoute memory route)
-    {
-        BridgeRoute[] memory availableRoutes = routes[block.chainid][destinationChain];
+    function getBestRoute(
+        uint256 destinationChain,
+        uint256 amount,
+        RoutePreference preference
+    ) external view returns (BridgeRoute memory route) {
+        BridgeRoute[] memory availableRoutes = routes[block.chainid][
+            destinationChain
+        ];
         require(availableRoutes.length > 0, "No routes available");
 
         uint256 bestIndex = 0;
@@ -294,15 +325,24 @@ contract VPayBridgeHub is
             if (!availableRoutes[i].isActive) continue;
 
             if (preference == RoutePreference.FASTEST) {
-                if (availableRoutes[i].estimatedTime < availableRoutes[bestIndex].estimatedTime) {
+                if (
+                    availableRoutes[i].estimatedTime <
+                    availableRoutes[bestIndex].estimatedTime
+                ) {
                     bestIndex = i;
                 }
             } else if (preference == RoutePreference.CHEAPEST) {
-                if (availableRoutes[i].baseFee < availableRoutes[bestIndex].baseFee) {
+                if (
+                    availableRoutes[i].baseFee <
+                    availableRoutes[bestIndex].baseFee
+                ) {
                     bestIndex = i;
                 }
             } else if (preference == RoutePreference.MOST_RELIABLE) {
-                if (availableRoutes[i].successRate > availableRoutes[bestIndex].successRate) {
+                if (
+                    availableRoutes[i].successRate >
+                    availableRoutes[bestIndex].successRate
+                ) {
                     bestIndex = i;
                 }
             }
@@ -315,14 +355,23 @@ contract VPayBridgeHub is
      * @notice Retry failed bridge
      * @param bridgeId Bridge identifier
      */
-    function retryFailedBridge(bytes32 bridgeId) external onlyRole(BRIDGE_OPERATOR_ROLE) {
+    function retryFailedBridge(
+        bytes32 bridgeId
+    ) external onlyRole(BRIDGE_OPERATOR_ROLE) {
         CrossChainPayment storage payment = crossChainPayments[bridgeId];
         require(payment.status == BridgeStatus.FAILED, "Not failed");
 
         payment.status = BridgeStatus.IN_TRANSIT;
 
         // Retry with same or different protocol
-        _executeBridge(bridgeId, payment.destChain, payment.recipient, payment.amount, payment.protocol, "");
+        _executeBridge(
+            bridgeId,
+            payment.destChain,
+            payment.recipient,
+            payment.amount,
+            payment.protocol,
+            hex""
+        );
     }
 
     /**
@@ -332,7 +381,11 @@ contract VPayBridgeHub is
     function refundFailedBridge(bytes32 bridgeId) external nonReentrant {
         CrossChainPayment storage payment = crossChainPayments[bridgeId];
         require(payment.status == BridgeStatus.FAILED, "Not failed");
-        require(payment.sender == msg.sender || hasRole(BRIDGE_OPERATOR_ROLE, msg.sender), "Unauthorized");
+        require(
+            payment.sender == msg.sender ||
+                hasRole(BRIDGE_OPERATOR_ROLE, msg.sender),
+            "Unauthorized"
+        );
 
         payment.status = BridgeStatus.REFUNDED;
 
@@ -345,7 +398,10 @@ contract VPayBridgeHub is
      * @param chainId Chain ID
      * @param amount Amount to add
      */
-    function addLiquidity(uint256 chainId, uint256 amount) external onlyRole(LIQUIDITY_PROVIDER_ROLE) {
+    function addLiquidity(
+        uint256 chainId,
+        uint256 amount
+    ) external onlyRole(LIQUIDITY_PROVIDER_ROLE) {
         chainLiquidity[chainId] += amount;
         emit LiquidityAdded(chainId, amount);
     }
@@ -366,7 +422,13 @@ contract VPayBridgeHub is
         uint256 baseFee
     ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         routes[sourceChain][destChain].push(
-            BridgeRoute({protocol: protocol, estimatedTime: estimatedTime, baseFee: baseFee, isActive: true, successRate: 10000})
+            BridgeRoute({
+                protocol: protocol,
+                estimatedTime: estimatedTime,
+                baseFee: baseFee,
+                isActive: true,
+                successRate: 10000
+            })
         );
 
         emit RouteUpdated(sourceChain, destChain, protocol);
@@ -377,7 +439,10 @@ contract VPayBridgeHub is
      * @param protocol Bridge protocol
      * @param endpoint Endpoint address
      */
-    function setProtocolEndpoint(BridgeProtocol protocol, address endpoint) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setProtocolEndpoint(
+        BridgeProtocol protocol,
+        address endpoint
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(endpoint != address(0), "Invalid endpoint");
         protocolEndpoints[protocol] = endpoint;
     }
@@ -386,7 +451,9 @@ contract VPayBridgeHub is
      * @notice Update bridge fee
      * @param _bridgeFeeBps New bridge fee
      */
-    function setBridgeFee(uint256 _bridgeFeeBps) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setBridgeFee(
+        uint256 _bridgeFeeBps
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(_bridgeFeeBps <= MAX_BRIDGE_FEE, "Fee too high");
         bridgeFeeBps = _bridgeFeeBps;
     }
@@ -395,7 +462,9 @@ contract VPayBridgeHub is
      * @notice Update daily rate limit
      * @param _dailyRateLimit New rate limit
      */
-    function setDailyRateLimit(uint256 _dailyRateLimit) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function setDailyRateLimit(
+        uint256 _dailyRateLimit
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         dailyRateLimit = _dailyRateLimit;
     }
 
@@ -404,7 +473,10 @@ contract VPayBridgeHub is
      * @param bridgeId Bridge identifier
      * @param reason Failure reason
      */
-    function markBridgeFailed(bytes32 bridgeId, string calldata reason) external onlyRole(BRIDGE_OPERATOR_ROLE) {
+    function markBridgeFailed(
+        bytes32 bridgeId,
+        string calldata reason
+    ) external onlyRole(BRIDGE_OPERATOR_ROLE) {
         crossChainPayments[bridgeId].status = BridgeStatus.FAILED;
         emit BridgeFailed(bridgeId, reason);
     }
@@ -426,5 +498,7 @@ contract VPayBridgeHub is
     /**
      * @notice Authorize contract upgrade
      */
-    function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyRole(UPGRADER_ROLE) {}
 }

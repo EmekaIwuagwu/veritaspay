@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
 /**
  * @title VPayPaymaster
@@ -55,7 +55,12 @@ contract VPayPaymaster is Ownable {
     mapping(uint256 => uint256) public chainGasTanks;
 
     /// @notice Events
-    event GasSponsored(address indexed user, uint256 vpusdAmount, uint256 gasAmount, SponsorshipType sponsorshipType);
+    event GasSponsored(
+        address indexed user,
+        uint256 vpusdAmount,
+        uint256 gasAmount,
+        SponsorshipType sponsorshipType
+    );
     event GasTankRefilled(uint256 amount);
     event MerchantSubsidyAdded(address indexed merchant, uint256 amount);
     event ServiceFeeUpdated(uint256 oldFee, uint256 newFee);
@@ -67,9 +72,12 @@ contract VPayPaymaster is Ownable {
      * @param _nativeTokenOracle Native token price oracle
      * @param _serviceFeeBps Service fee in basis points
      */
-    constructor(address _entryPoint, address _vpusd, address _nativeTokenOracle, uint256 _serviceFeeBps)
-        Ownable(msg.sender)
-    {
+    constructor(
+        address _entryPoint,
+        address _vpusd,
+        address _nativeTokenOracle,
+        uint256 _serviceFeeBps
+    ) Ownable(msg.sender) {
         require(_entryPoint != address(0), "Invalid entrypoint");
         require(_vpusd != address(0), "Invalid VPUSD");
         require(_nativeTokenOracle != address(0), "Invalid oracle");
@@ -105,7 +113,11 @@ contract VPayPaymaster is Ownable {
      * @notice Post-operation handler (ERC-4337)
      * @dev Called after user operation to settle actual gas cost
      */
-    function postOp(PostOpMode /* mode */, bytes calldata context, uint256 actualGasCost) external {
+    function postOp(
+        PostOpMode /* mode */,
+        bytes calldata context,
+        uint256 actualGasCost
+    ) external {
         require(msg.sender == entryPoint, "Only EntryPoint");
 
         uint256 maxCost = abi.decode(context, (uint256));
@@ -122,9 +134,13 @@ contract VPayPaymaster is Ownable {
      * @param gasPrice Gas price in wei
      * @return vpusdFee Fee amount in VPUSD
      */
-    function calculateVPUSDFee(uint256 estimatedGas, uint256 gasPrice) public view returns (uint256 vpusdFee) {
+    function calculateVPUSDFee(
+        uint256 estimatedGas,
+        uint256 gasPrice
+    ) public view returns (uint256 vpusdFee) {
         // Get native token price (ETH, MATIC, etc.)
-        (, int256 nativePrice,, uint256 updatedAt,) = nativeTokenOracle.latestRoundData();
+        (, int256 nativePrice, , uint256 updatedAt, ) = nativeTokenOracle
+            .latestRoundData();
         require(updatedAt >= block.timestamp - 1 hours, "Stale price");
         require(nativePrice > 0, "Invalid price");
 
@@ -134,7 +150,9 @@ contract VPayPaymaster is Ownable {
         uint256 gasCostWei = estimatedGas * gasPrice;
 
         // Convert to USD (18 decimals)
-        uint256 gasCostUSD = (gasCostWei * uint256(nativePrice) * 1e18) / (10 ** decimals) / 1e18;
+        uint256 gasCostUSD = (gasCostWei * uint256(nativePrice) * 1e18) /
+            (10 ** decimals) /
+            1e18;
 
         // Add service fee
         vpusdFee = (gasCostUSD * (10000 + serviceFeeBps)) / 10000;
@@ -146,13 +164,22 @@ contract VPayPaymaster is Ownable {
      * @param estimatedGas Estimated gas
      * @param gasPrice Gas price
      */
-    function sponsorWithVPUSD(address user, uint256 estimatedGas, uint256 gasPrice) external {
+    function sponsorWithVPUSD(
+        address user,
+        uint256 estimatedGas,
+        uint256 gasPrice
+    ) external {
         uint256 vpusdFee = calculateVPUSDFee(estimatedGas, gasPrice);
 
         // Collect VPUSD from user
         vpusd.safeTransferFrom(user, address(this), vpusdFee);
 
-        emit GasSponsored(user, vpusdFee, estimatedGas * gasPrice, SponsorshipType.PARTIAL);
+        emit GasSponsored(
+            user,
+            vpusdFee,
+            estimatedGas * gasPrice,
+            SponsorshipType.PARTIAL
+        );
     }
 
     /**
@@ -162,15 +189,28 @@ contract VPayPaymaster is Ownable {
      * @param estimatedGas Estimated gas
      * @param gasPrice Gas price
      */
-    function merchantSponsor(address merchant, address customer, uint256 estimatedGas, uint256 gasPrice) external {
+    function merchantSponsor(
+        address merchant,
+        address customer,
+        uint256 estimatedGas,
+        uint256 gasPrice
+    ) external {
         require(merchantGasBudgets[merchant] > 0, "No budget");
 
         uint256 vpusdFee = calculateVPUSDFee(estimatedGas, gasPrice);
-        require(merchantGasBudgets[merchant] >= vpusdFee, "Insufficient budget");
+        require(
+            merchantGasBudgets[merchant] >= vpusdFee,
+            "Insufficient budget"
+        );
 
         merchantGasBudgets[merchant] -= vpusdFee;
 
-        emit GasSponsored(customer, vpusdFee, estimatedGas * gasPrice, SponsorshipType.MERCHANT_SUBSIDIZED);
+        emit GasSponsored(
+            customer,
+            vpusdFee,
+            estimatedGas * gasPrice,
+            SponsorshipType.MERCHANT_SUBSIDIZED
+        );
     }
 
     /**
@@ -178,7 +218,10 @@ contract VPayPaymaster is Ownable {
      * @param merchant Merchant address
      * @param vpusdAmount Amount of VPUSD to add
      */
-    function addMerchantSubsidy(address merchant, uint256 vpusdAmount) external {
+    function addMerchantSubsidy(
+        address merchant,
+        uint256 vpusdAmount
+    ) external {
         vpusd.safeTransferFrom(msg.sender, address(this), vpusdAmount);
         merchantGasBudgets[merchant] += vpusdAmount;
 
@@ -208,7 +251,7 @@ contract VPayPaymaster is Ownable {
         require(amount <= gasTankBalance, "Insufficient balance");
         gasTankBalance -= amount;
 
-        (bool success,) = owner().call{value: amount}("");
+        (bool success, ) = owner().call{value: amount}("");
         require(success, "Transfer failed");
     }
 
@@ -244,7 +287,10 @@ contract VPayPaymaster is Ownable {
      * @param account Account address
      * @param sponsorshipType Type of sponsorship
      */
-    function setSponsorship(address account, SponsorshipType sponsorshipType) external onlyOwner {
+    function setSponsorship(
+        address account,
+        SponsorshipType sponsorshipType
+    ) external onlyOwner {
         sponsorships[account] = sponsorshipType;
     }
 
