@@ -317,6 +317,10 @@ The VeritasPay protocol has undergone a comprehensive internal audit and unit te
 - [x] Merchant Payment & Fiat Offramp Integration
 - [x] Cross-chain Smart Routing & Liquidity Hub
 - [x] ERC-4337 Gasless Transaction Support
+- [x] **DEX Integration** (Uniswap V2 for stabilization swaps)
+- [x] **Multi-sig Emergency Governance** (Pause/Unpause via consensus)
+- [x] **Cross-chain Protocol Bindings** (LayerZero, Axelar, Wormhole, CCIP)
+- [x] **Full Deployment Script** (UUPS proxy deployment with role setup)
 
 ---
 

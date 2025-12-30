@@ -11,6 +11,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 import "./interfaces/IHybridVault.sol";
 import "./interfaces/IVeritasPayUSD.sol";
+import "./interfaces/IUniswapV2Router.sol";
 
 /**
  * @title HybridVault
@@ -87,6 +88,12 @@ contract HybridVault is
 
     /// @notice DEX router for stabilization operations
     address public dexRouter;
+
+    /// @notice Primary collateral token for DEX operations (e.g., USDC)
+    address public primaryCollateral;
+
+    /// @notice Slippage tolerance for DEX swaps (in basis points)
+    uint256 public swapSlippageBps;
 
     /// @notice Constants
     uint256 private constant BPS_DENOMINATOR = 10000;
@@ -357,8 +364,10 @@ contract HybridVault is
             vpusd.mint(address(this), mintAmount);
             dailyMinted += mintAmount;
 
-            // TODO: Sell on DEX to acquire more collateral
-            // This would require DEX integration (Uniswap, Curve, etc.)
+            // Sell minted VPUSD on DEX for collateral
+            if (dexRouter != address(0) && primaryCollateral != address(0)) {
+                _sellOnDex(mintAmount);
+            }
 
             supplyChange = int256(mintAmount);
         }
@@ -388,15 +397,22 @@ contract HybridVault is
         }
 
         if (burnAmount > 0) {
-            // TODO: Buy from DEX using collateral
-            // Then burn the acquired VPUSD
-
-            // For now, burn from this contract if available
-            uint256 balance = vpusd.balanceOf(address(this));
-            if (balance >= burnAmount) {
-                vpusd.burn(address(this), burnAmount);
-                dailyBurned += burnAmount;
-                supplyChange = -int256(burnAmount);
+            // Buy VPUSD from DEX using collateral
+            if (dexRouter != address(0) && primaryCollateral != address(0)) {
+                uint256 purchased = _buyFromDex(burnAmount);
+                if (purchased > 0) {
+                    vpusd.burn(address(this), purchased);
+                    dailyBurned += purchased;
+                    supplyChange = -int256(purchased);
+                }
+            } else {
+                // Fallback: burn from this contract if available
+                uint256 balance = vpusd.balanceOf(address(this));
+                if (balance >= burnAmount) {
+                    vpusd.burn(address(this), burnAmount);
+                    dailyBurned += burnAmount;
+                    supplyChange = -int256(burnAmount);
+                }
             }
         }
     }
@@ -676,6 +692,111 @@ contract HybridVault is
         deviationThreshold = _deviationThreshold;
         maxDailyMintCap = _maxDailyMintCap;
         maxDailyBurnCap = _maxDailyBurnCap;
+    }
+
+    /**
+     * @notice Set primary collateral for DEX operations
+     * @param _primaryCollateral Collateral token address (e.g., USDC)
+     */
+    function setPrimaryCollateral(
+        address _primaryCollateral
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(_primaryCollateral != address(0), "Invalid collateral");
+        primaryCollateral = _primaryCollateral;
+    }
+
+    /**
+     * @notice Set swap slippage tolerance
+     * @param _slippageBps Slippage in basis points (e.g., 50 = 0.5%)
+     */
+    function setSwapSlippage(
+        uint256 _slippageBps
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(_slippageBps <= 1000, "Slippage too high"); // Max 10%
+        swapSlippageBps = _slippageBps;
+    }
+
+    /**
+     * @notice Sell VPUSD on DEX for collateral (during expansion)
+     * @param amount Amount of VPUSD to sell
+     */
+    function _sellOnDex(uint256 amount) private {
+        if (amount == 0) return;
+
+        address[] memory path = new address[](2);
+        path[0] = address(vpusd);
+        path[1] = primaryCollateral;
+
+        // Approve router
+        IERC20(address(vpusd)).approve(dexRouter, amount);
+
+        // Calculate minimum output with slippage
+        uint256[] memory amountsOut = IUniswapV2Router(dexRouter).getAmountsOut(
+            amount,
+            path
+        );
+        uint256 minOut = (amountsOut[1] * (BPS_DENOMINATOR - swapSlippageBps)) /
+            BPS_DENOMINATOR;
+
+        // Execute swap
+        IUniswapV2Router(dexRouter).swapExactTokensForTokens(
+            amount,
+            minOut,
+            path,
+            address(this),
+            block.timestamp + 300 // 5 minute deadline
+        );
+    }
+
+    /**
+     * @notice Buy VPUSD from DEX using collateral (during contraction)
+     * @param amount Target amount of VPUSD to buy
+     * @return purchased Actual amount of VPUSD purchased
+     */
+    function _buyFromDex(uint256 amount) private returns (uint256 purchased) {
+        if (amount == 0) return 0;
+
+        address[] memory path = new address[](2);
+        path[0] = primaryCollateral;
+        path[1] = address(vpusd);
+
+        // Calculate collateral needed
+        uint256[] memory amountsIn = IUniswapV2Router(dexRouter).getAmountsIn(
+            amount,
+            path
+        );
+        uint256 collateralNeeded = amountsIn[0];
+
+        // Check if we have enough collateral
+        uint256 available = IERC20(primaryCollateral).balanceOf(address(this));
+        if (available < collateralNeeded) {
+            // Recalculate with available collateral
+            uint256[] memory adjustedOut = IUniswapV2Router(dexRouter)
+                .getAmountsOut(available, path);
+            amount = adjustedOut[1];
+            collateralNeeded = available;
+        }
+
+        if (collateralNeeded == 0) return 0;
+
+        // Approve router
+        IERC20(primaryCollateral).approve(dexRouter, collateralNeeded);
+
+        // Calculate minimum output with slippage
+        uint256 minOut = (amount * (BPS_DENOMINATOR - swapSlippageBps)) /
+            BPS_DENOMINATOR;
+
+        // Execute swap
+        uint256[] memory amounts = IUniswapV2Router(dexRouter)
+            .swapExactTokensForTokens(
+                collateralNeeded,
+                minOut,
+                path,
+                address(this),
+                block.timestamp + 300
+            );
+
+        purchased = amounts[1];
     }
 
     /**

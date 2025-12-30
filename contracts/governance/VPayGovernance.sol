@@ -4,13 +4,18 @@ pragma solidity ^0.8.24;
 import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import "../core/interfaces/IPausable.sol";
 
 /**
  * @title VPayGovernance
  * @notice Governance and parameter management for VeritasPay protocol
  * @dev Manages system parameters and multi-signature operations
  */
-contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradeable {
+contract VPayGovernance is
+    Initializable,
+    AccessControlUpgradeable,
+    UUPSUpgradeable
+{
     /// @notice Proposal status
     enum ProposalStatus {
         PENDING,
@@ -79,6 +84,17 @@ contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradea
     /// @notice Proposal threshold (percentage of total supply needed)
     uint256 public proposalThreshold;
 
+    /// @notice Emergency action tracking
+    struct EmergencyAction {
+        address target;
+        uint256 confirmations;
+        mapping(address => bool) confirmed;
+        bool executed;
+    }
+
+    /// @notice Pending emergency actions
+    mapping(bytes32 => EmergencyAction) public emergencyActions;
+
     /// @notice Events
     event ProposalCreated(
         uint256 indexed proposalId,
@@ -87,10 +103,19 @@ contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradea
         ProposalType proposalType,
         uint256 votingEndTime
     );
-    event VoteCast(uint256 indexed proposalId, address indexed voter, bool support, uint256 weight);
+    event VoteCast(
+        uint256 indexed proposalId,
+        address indexed voter,
+        bool support,
+        uint256 weight
+    );
     event ProposalExecuted(uint256 indexed proposalId);
     event ProposalCancelled(uint256 indexed proposalId);
-    event ParameterChanged(string parameterName, uint256 oldValue, uint256 newValue);
+    event ParameterChanged(
+        string parameterName,
+        uint256 oldValue,
+        uint256 newValue
+    );
     event EmergencyActionExecuted(string action, address executor);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -104,7 +129,11 @@ contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @param signers Array of multi-sig signers
      * @param _requiredSignatures Required signatures for emergency actions
      */
-    function initialize(address admin, address[] memory signers, uint256 _requiredSignatures) external initializer {
+    function initialize(
+        address admin,
+        address[] memory signers,
+        uint256 _requiredSignatures
+    ) external initializer {
         require(admin != address(0), "Invalid admin");
         require(signers.length >= _requiredSignatures, "Invalid signer count");
         require(_requiredSignatures > 0, "Invalid required signatures");
@@ -149,11 +178,12 @@ contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @param callData Encoded function call
      * @return proposalId Proposal ID
      */
-    function propose(string calldata description, ProposalType proposalType, address target, bytes calldata callData)
-        external
-        onlyRole(PROPOSER_ROLE)
-        returns (uint256 proposalId)
-    {
+    function propose(
+        string calldata description,
+        ProposalType proposalType,
+        address target,
+        bytes calldata callData
+    ) external onlyRole(PROPOSER_ROLE) returns (uint256 proposalId) {
         proposalId = ++proposalCount;
 
         Proposal storage proposal = proposals[proposalId];
@@ -167,7 +197,13 @@ contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradea
         proposal.votingEndTime = block.timestamp + votingPeriod;
         proposal.status = ProposalStatus.ACTIVE;
 
-        emit ProposalCreated(proposalId, msg.sender, description, proposalType, proposal.votingEndTime);
+        emit ProposalCreated(
+            proposalId,
+            msg.sender,
+            description,
+            proposalType,
+            proposal.votingEndTime
+        );
     }
 
     /**
@@ -177,7 +213,10 @@ contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      */
     function castVote(uint256 proposalId, bool support) external {
         Proposal storage proposal = proposals[proposalId];
-        require(proposal.status == ProposalStatus.ACTIVE, "Proposal not active");
+        require(
+            proposal.status == ProposalStatus.ACTIVE,
+            "Proposal not active"
+        );
         require(block.timestamp <= proposal.votingEndTime, "Voting ended");
         require(!proposal.hasVoted[msg.sender], "Already voted");
         require(isValidSigner[msg.sender], "Not a valid voter");
@@ -197,18 +236,26 @@ contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @notice Execute a proposal
      * @param proposalId Proposal ID
      */
-    function executeProposal(uint256 proposalId) external onlyRole(EXECUTOR_ROLE) {
+    function executeProposal(
+        uint256 proposalId
+    ) external onlyRole(EXECUTOR_ROLE) {
         Proposal storage proposal = proposals[proposalId];
-        require(proposal.status == ProposalStatus.ACTIVE, "Proposal not active");
+        require(
+            proposal.status == ProposalStatus.ACTIVE,
+            "Proposal not active"
+        );
         require(block.timestamp > proposal.votingEndTime, "Voting not ended");
 
         // Check if proposal passed (simple majority)
-        if (proposal.forVotes > proposal.againstVotes && proposal.forVotes >= requiredSignatures) {
+        if (
+            proposal.forVotes > proposal.againstVotes &&
+            proposal.forVotes >= requiredSignatures
+        ) {
             proposal.status = ProposalStatus.EXECUTED;
 
             // Execute the proposal
             if (proposal.target != address(0)) {
-                (bool success,) = proposal.target.call(proposal.callData);
+                (bool success, ) = proposal.target.call(proposal.callData);
                 require(success, "Execution failed");
             }
 
@@ -222,9 +269,14 @@ contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @notice Cancel a proposal
      * @param proposalId Proposal ID
      */
-    function cancelProposal(uint256 proposalId) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function cancelProposal(
+        uint256 proposalId
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         Proposal storage proposal = proposals[proposalId];
-        require(proposal.status == ProposalStatus.ACTIVE, "Proposal not active");
+        require(
+            proposal.status == ProposalStatus.ACTIVE,
+            "Proposal not active"
+        );
 
         proposal.status = ProposalStatus.CANCELLED;
         emit ProposalCancelled(proposalId);
@@ -235,31 +287,53 @@ contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @param paramName Parameter name
      * @param newValue New value
      */
-    function updateParameter(string calldata paramName, uint256 newValue) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function updateParameter(
+        string calldata paramName,
+        uint256 newValue
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         uint256 oldValue;
 
-        if (keccak256(bytes(paramName)) == keccak256(bytes("minReserveRatio"))) {
+        if (
+            keccak256(bytes(paramName)) == keccak256(bytes("minReserveRatio"))
+        ) {
             oldValue = systemParameters.minReserveRatio;
             systemParameters.minReserveRatio = newValue;
-        } else if (keccak256(bytes(paramName)) == keccak256(bytes("targetReserveRatio"))) {
+        } else if (
+            keccak256(bytes(paramName)) ==
+            keccak256(bytes("targetReserveRatio"))
+        ) {
             oldValue = systemParameters.targetReserveRatio;
             systemParameters.targetReserveRatio = newValue;
-        } else if (keccak256(bytes(paramName)) == keccak256(bytes("maxDailyMintCap"))) {
+        } else if (
+            keccak256(bytes(paramName)) == keccak256(bytes("maxDailyMintCap"))
+        ) {
             oldValue = systemParameters.maxDailyMintCap;
             systemParameters.maxDailyMintCap = newValue;
-        } else if (keccak256(bytes(paramName)) == keccak256(bytes("maxDailyBurnCap"))) {
+        } else if (
+            keccak256(bytes(paramName)) == keccak256(bytes("maxDailyBurnCap"))
+        ) {
             oldValue = systemParameters.maxDailyBurnCap;
             systemParameters.maxDailyBurnCap = newValue;
-        } else if (keccak256(bytes(paramName)) == keccak256(bytes("deviationThreshold"))) {
+        } else if (
+            keccak256(bytes(paramName)) ==
+            keccak256(bytes("deviationThreshold"))
+        ) {
             oldValue = systemParameters.deviationThreshold;
             systemParameters.deviationThreshold = newValue;
-        } else if (keccak256(bytes(paramName)) == keccak256(bytes("basePaymentFee"))) {
+        } else if (
+            keccak256(bytes(paramName)) == keccak256(bytes("basePaymentFee"))
+        ) {
             oldValue = systemParameters.basePaymentFee;
             systemParameters.basePaymentFee = newValue;
-        } else if (keccak256(bytes(paramName)) == keccak256(bytes("bridgeFeePercentage"))) {
+        } else if (
+            keccak256(bytes(paramName)) ==
+            keccak256(bytes("bridgeFeePercentage"))
+        ) {
             oldValue = systemParameters.bridgeFeePercentage;
             systemParameters.bridgeFeePercentage = newValue;
-        } else if (keccak256(bytes(paramName)) == keccak256(bytes("merchantFee"))) {
+        } else if (
+            keccak256(bytes(paramName)) == keccak256(bytes("merchantFee"))
+        ) {
             oldValue = systemParameters.merchantFee;
             systemParameters.merchantFee = newValue;
         } else {
@@ -270,13 +344,57 @@ contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradea
     }
 
     /**
-     * @notice Emergency pause (requires multi-sig)
+     * @notice Emergency pause (requires multi-sig confirmation)
      * @param target Target contract to pause
      */
     function emergencyPause(address target) external {
         require(isValidSigner[msg.sender], "Not a signer");
-        // In production, this would require multi-sig confirmation
-        emit EmergencyActionExecuted("pause", msg.sender);
+        require(target != address(0), "Invalid target");
+
+        bytes32 actionId = keccak256(
+            abi.encodePacked("pause", target, block.timestamp / 1 hours)
+        );
+        EmergencyAction storage action = emergencyActions[actionId];
+
+        if (!action.confirmed[msg.sender]) {
+            action.target = target;
+            action.confirmed[msg.sender] = true;
+            action.confirmations++;
+        }
+
+        // Execute if we have enough confirmations
+        if (action.confirmations >= requiredSignatures && !action.executed) {
+            action.executed = true;
+            IPausable(target).pause();
+            emit EmergencyActionExecuted("pause", msg.sender);
+        }
+    }
+
+    /**
+     * @notice Emergency unpause (requires multi-sig confirmation)
+     * @param target Target contract to unpause
+     */
+    function emergencyUnpause(address target) external {
+        require(isValidSigner[msg.sender], "Not a signer");
+        require(target != address(0), "Invalid target");
+
+        bytes32 actionId = keccak256(
+            abi.encodePacked("unpause", target, block.timestamp / 1 hours)
+        );
+        EmergencyAction storage action = emergencyActions[actionId];
+
+        if (!action.confirmed[msg.sender]) {
+            action.target = target;
+            action.confirmed[msg.sender] = true;
+            action.confirmations++;
+        }
+
+        // Execute if we have enough confirmations
+        if (action.confirmations >= requiredSignatures && !action.executed) {
+            action.executed = true;
+            IPausable(target).unpause();
+            emit EmergencyActionExecuted("unpause", msg.sender);
+        }
     }
 
     /**
@@ -293,9 +411,14 @@ contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @notice Remove a signer from multi-sig
      * @param signer Signer address
      */
-    function removeSigner(address signer) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function removeSigner(
+        address signer
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(isValidSigner[signer], "Not a signer");
-        require(totalSigners > requiredSignatures, "Cannot remove, would break multi-sig");
+        require(
+            totalSigners > requiredSignatures,
+            "Cannot remove, would break multi-sig"
+        );
         isValidSigner[signer] = false;
         totalSigners--;
     }
@@ -304,8 +427,13 @@ contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @notice Update required signatures
      * @param _requiredSignatures New required signatures
      */
-    function updateRequiredSignatures(uint256 _requiredSignatures) external onlyRole(DEFAULT_ADMIN_ROLE) {
-        require(_requiredSignatures > 0 && _requiredSignatures <= totalSigners, "Invalid required signatures");
+    function updateRequiredSignatures(
+        uint256 _requiredSignatures
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(
+            _requiredSignatures > 0 && _requiredSignatures <= totalSigners,
+            "Invalid required signatures"
+        );
         requiredSignatures = _requiredSignatures;
     }
 
@@ -313,7 +441,9 @@ contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @notice Update voting period
      * @param _votingPeriod New voting period
      */
-    function updateVotingPeriod(uint256 _votingPeriod) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function updateVotingPeriod(
+        uint256 _votingPeriod
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(_votingPeriod > 0, "Invalid voting period");
         votingPeriod = _votingPeriod;
     }
@@ -322,7 +452,9 @@ contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradea
      * @notice Get proposal details
      * @param proposalId Proposal ID
      */
-    function getProposal(uint256 proposalId)
+    function getProposal(
+        uint256 proposalId
+    )
         external
         view
         returns (
@@ -350,5 +482,7 @@ contract VPayGovernance is Initializable, AccessControlUpgradeable, UUPSUpgradea
     /**
      * @notice Authorize contract upgrade
      */
-    function _authorizeUpgrade(address newImplementation) internal override onlyRole(UPGRADER_ROLE) {}
+    function _authorizeUpgrade(
+        address newImplementation
+    ) internal override onlyRole(UPGRADER_ROLE) {}
 }

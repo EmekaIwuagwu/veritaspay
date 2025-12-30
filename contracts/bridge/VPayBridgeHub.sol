@@ -9,6 +9,7 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "../core/interfaces/IVeritasPayUSD.sol";
+import "./interfaces/IBridgeProtocols.sol";
 
 /**
  * @title VPayBridgeHub
@@ -274,11 +275,162 @@ contract VPayBridgeHub is
         // Mark as in transit
         crossChainPayments[bridgeId].status = BridgeStatus.IN_TRANSIT;
 
-        // In production, this would call the actual bridge protocol endpoints:
-        // Example LayerZero: ILayerZeroEndpoint(protocolEndpoints[BridgeProtocol.LAYERZERO]).send(...)
-        // Example Axelar: IAxelarGateway(protocolEndpoints[BridgeProtocol.AXELAR]).callContract(...)
+        address endpoint = protocolEndpoints[protocol];
+        if (endpoint == address(0)) {
+            // No endpoint configured, stay in transit for manual processing
+            return;
+        }
 
-        // For testing/demonstration, we simulate the transmission
+        // Execute based on protocol
+        if (protocol == BridgeProtocol.LAYERZERO) {
+            _executeLayerZero(
+                endpoint,
+                destinationChain,
+                recipient,
+                amount,
+                metadata
+            );
+        } else if (protocol == BridgeProtocol.AXELAR) {
+            _executeAxelar(endpoint, destinationChain, recipient, amount);
+        } else if (protocol == BridgeProtocol.WORMHOLE) {
+            _executeWormhole(endpoint, destinationChain, recipient, amount);
+        } else if (protocol == BridgeProtocol.CCIP) {
+            _executeCCIP(endpoint, destinationChain, recipient, amount);
+        }
+    }
+
+    /**
+     * @notice Execute via LayerZero
+     */
+    function _executeLayerZero(
+        address endpoint,
+        uint256 destChain,
+        address recipient,
+        uint256 amount,
+        bytes memory /* metadata */
+    ) private {
+        bytes memory payload = abi.encode(recipient, amount);
+        bytes memory destination = abi.encodePacked(address(this)); // Remote contract
+        bytes memory adapterParams = abi.encodePacked(
+            uint16(1),
+            uint256(200000)
+        ); // Gas limit
+
+        ILayerZeroEndpoint(endpoint).send{value: msg.value}(
+            uint16(destChain),
+            destination,
+            payload,
+            payable(msg.sender),
+            address(0),
+            adapterParams
+        );
+    }
+
+    /**
+     * @notice Execute via Axelar
+     */
+    function _executeAxelar(
+        address endpoint,
+        uint256 destChain,
+        address recipient,
+        uint256 amount
+    ) private {
+        string memory destChainName = _getAxelarChainName(destChain);
+        bytes memory payload = abi.encode(recipient, amount);
+
+        IAxelarGateway(endpoint).callContract(
+            destChainName,
+            _addressToString(address(this)),
+            payload
+        );
+    }
+
+    /**
+     * @notice Execute via Wormhole
+     */
+    function _executeWormhole(
+        address endpoint,
+        uint256 destChain,
+        address recipient,
+        uint256 amount
+    ) private {
+        bytes memory payload = abi.encode(recipient, amount);
+
+        IWormholeRelayer(endpoint).sendPayloadToEvm{value: msg.value}(
+            uint16(destChain),
+            address(this),
+            payload,
+            0,
+            200000
+        );
+    }
+
+    /**
+     * @notice Execute via Chainlink CCIP
+     */
+    function _executeCCIP(
+        address endpoint,
+        uint256 destChain,
+        address recipient,
+        uint256 amount
+    ) private {
+        bytes memory payload = abi.encode(recipient, amount);
+        address[] memory tokens;
+
+        ICCIPRouter.EVM2AnyMessage memory message = ICCIPRouter.EVM2AnyMessage({
+            receiver: abi.encode(address(this)),
+            data: payload,
+            tokenAmounts: tokens,
+            feeToken: address(0), // Pay in native
+            extraArgs: ""
+        });
+
+        ICCIPRouter(endpoint).ccipSend{value: msg.value}(
+            uint64(destChain),
+            message
+        );
+    }
+
+    /**
+     * @notice Get Axelar chain name from chain ID
+     */
+    function _getAxelarChainName(
+        uint256 chainId
+    ) private pure returns (string memory) {
+        if (chainId == 1) return "ethereum";
+        if (chainId == 137) return "polygon";
+        if (chainId == 42161) return "arbitrum";
+        if (chainId == 10) return "optimism";
+        if (chainId == 43114) return "avalanche";
+        if (chainId == 56) return "binance";
+        if (chainId == 8453) return "base";
+        return "";
+    }
+
+    /**
+     * @notice Convert address to string (for Axelar)
+     */
+    function _addressToString(
+        address addr
+    ) private pure returns (string memory) {
+        bytes memory s = new bytes(42);
+        s[0] = "0";
+        s[1] = "x";
+        for (uint256 i = 0; i < 20; i++) {
+            bytes1 b = bytes1(
+                uint8(uint256(uint160(addr)) / (2 ** (8 * (19 - i))))
+            );
+            bytes1 hi = bytes1(uint8(b) / 16);
+            bytes1 lo = bytes1(uint8(b) - 16 * uint8(hi));
+            s[2 + 2 * i] = _char(hi);
+            s[3 + 2 * i] = _char(lo);
+        }
+        return string(s);
+    }
+
+    function _char(bytes1 b) private pure returns (bytes1) {
+        if (uint8(b) < 10) return bytes1(uint8(b) + 0x30);
+        else return bytes1(uint8(b) + 0x57);
     }
 
     /**
