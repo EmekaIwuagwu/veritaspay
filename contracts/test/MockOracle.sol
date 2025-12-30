@@ -71,4 +71,8 @@ contract MockOracle is AggregatorV3Interface {
     {
         return (1, _price, block.timestamp, block.timestamp, 1);
     }
+
+    function updatePrice(int256 newPrice) external {
+        _price = newPrice;
+    }
 }
